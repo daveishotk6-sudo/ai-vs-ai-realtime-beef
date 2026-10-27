@@ -14,9 +14,9 @@ const PORT = process.env.PORT || 3000;
 const KEY1 = process.env.OPENROUTER_KEY_1;
 const KEY2 = process.env.OPENROUTER_KEY_2;
 
-// Models - you can change these
-const MODEL1 = process.env.MODEL_1 || 'openai/gpt-4o-mini';
-const MODEL2 = process.env.MODEL_2 || 'anthropic/claude-3.5-sonnet';
+// Free models by default (no cost)
+const MODEL1 = process.env.MODEL_1 || 'nvidia/nemotron-3-ultra-550b-a55b:free';
+const MODEL2 = process.env.MODEL_2 || 'google/gemma-4-31b-it:free';
 
 let conversation = [];
 let isRunning = false;
