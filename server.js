@@ -14,8 +14,8 @@ const PORT = process.env.PORT || 3000;
 const KEY1 = process.env.OPENROUTER_KEY_1;
 const KEY2 = process.env.OPENROUTER_KEY_2;
 
-// Both AIs use the SAME free model
-const MODEL = process.env.MODEL || 'nvidia/nemotron-3-ultra-550b-a55b:free';
+// Both AIs use the same model
+const MODEL = process.env.MODEL || 'openai/gpt-5-mini';
 
 let conversation = [];
 let isRunning = false;
@@ -82,8 +82,8 @@ async function callOpenRouter(key, model, systemPrompt, messages, socket) {
             { role: 'system', content: systemPrompt },
             ...messages
           ],
-          max_tokens: 600,          // Allow full paragraphs
-          temperature: 1.1          // Higher creativity / chaos
+          max_tokens: 600,
+          temperature: 1.1
         })
       });
 
