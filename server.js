@@ -21,7 +21,17 @@ const MODEL2 = process.env.MODEL_2 || 'google/gemma-4-31b-it:free';
 let conversation = [];
 let isRunning = false;
 let turnCount = 0;
-const MAX_TURNS = 30; // safety stop
+const MAX_TURNS = 40;
+const MAX_RETRIES = 8;
+const BASE_DELAY = 2000; // 2 seconds base wait on error
+
+// Simple debug logger that also sends to frontend
+function debug(socket, msg) {
+  const time = new Date().toISOString().substr(11, 8);
+  const full = `[${time}] ${msg}`;
+  console.log(full);
+  if (socket) socket.emit('debug', { message: full });
+}
 
 // System prompts that escalate
 const getSystemPrompt = (aiName, turn) => {
@@ -34,40 +44,91 @@ const getSystemPrompt = (aiName, turn) => {
   }
 };
 
-async function callOpenRouter(key, model, systemPrompt, messages) {
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${key}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://github.com/daveishotk6-sudo/ai-vs-ai-realtime-beef',
-      'X-Title': 'AI vs AI Beef'
-    },
-    body: JSON.stringify({
-      model: model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...messages
-      ],
-      max_tokens: 150,
-      temperature: 0.9
-    })
-  });
+async function callOpenRouter(key, model, systemPrompt, messages, socket) {
+  let lastError = null;
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`OpenRouter error: ${response.status} - ${err}`);
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      debug(socket, `Calling ${model} (attempt ${attempt}/${MAX_RETRIES})...`);
+
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${key}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://github.com/daveishotk6-sudo/ai-vs-ai-realtime-beef',
+          'X-Title': 'AI vs AI Beef'
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            ...messages
+          ],
+          max_tokens: 150,
+          temperature: 0.9
+        })
+      });
+
+      const text = await response.text();
+
+      if (!response.ok) {
+        // Rate limit or temporary error → wait and retry
+        const waitTime = BASE_DELAY * attempt; // increasing wait
+        debug(socket, `Error ${response.status}: ${text.substring(0, 120)}... waiting ${waitTime / 1000}s`);
+        lastError = new Error(`OpenRouter ${response.status}: ${text.substring(0, 200)}`);
+        await new Promise(r => setTimeout(r, waitTime));
+        continue;
+      }
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        debug(socket, `JSON parse fail, retrying...`);
+        await new Promise(r => setTimeout(r, BASE_DELAY * attempt));
+        continue;
+      }
+
+      if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+        debug(socket, `Bad response shape, retrying...`);
+        await new Promise(r => setTimeout(r, BASE_DELAY * attempt));
+        continue;
+      }
+
+      const content = data.choices[0].message.content?.trim();
+      if (!content) {
+        debug(socket, `Empty content, retrying...`);
+        await new Promise(r => setTimeout(r, BASE_DELAY * attempt));
+        continue;
+      }
+
+      debug(socket, `Got reply (${content.length} chars)`);
+      return content;
+
+    } catch (err) {
+      // Network / timeout errors
+      lastError = err;
+      const waitTime = BASE_DELAY * attempt;
+      debug(socket, `Network error: ${err.message} — waiting ${waitTime / 1000}s`);
+      await new Promise(r => setTimeout(r, waitTime));
+    }
   }
 
-  const data = await response.json();
-  return data.choices[0].message.content.trim();
+  // All retries failed
+  throw lastError || new Error('Max retries reached');
 }
 
 async function runConversation(socket) {
-  if (isRunning) return;
+  if (isRunning) {
+    debug(socket, 'Already running, ignoring start');
+    return;
+  }
   isRunning = true;
   turnCount = 0;
   conversation = [];
+
+  debug(socket, `Starting conversation | MODEL1=${MODEL1} | MODEL2=${MODEL2}`);
 
   // Starting message
   const starter = "Hey, what's good? Ready to chat?";
@@ -83,39 +144,42 @@ async function runConversation(socket) {
       content: m.content
     }));
 
+    let speaker, key, model, sys;
+
+    if (turnCount % 2 === 1) {
+      speaker = 'AI-2';
+      key = KEY2;
+      model = MODEL2;
+      sys = getSystemPrompt('AI-2', turnCount);
+    } else {
+      speaker = 'AI-1';
+      key = KEY1;
+      model = MODEL1;
+      sys = getSystemPrompt('AI-1', turnCount);
+    }
+
     try {
-      let reply, speaker, key, model, sys;
-
-      if (turnCount % 2 === 1) {
-        // AI-2 responds
-        speaker = 'AI-2';
-        key = KEY2;
-        model = MODEL2;
-        sys = getSystemPrompt('AI-2', turnCount);
-      } else {
-        // AI-1 responds
-        speaker = 'AI-1';
-        key = KEY1;
-        model = MODEL1;
-        sys = getSystemPrompt('AI-1', turnCount);
-      }
-
-      reply = await callOpenRouter(key, model, sys, history);
+      const reply = await callOpenRouter(key, model, sys, history, socket);
 
       conversation.push({ role: 'assistant', content: reply, speaker });
       socket.emit('message', { speaker, text: reply, turn: turnCount });
 
-      // Small delay so it feels realtime
-      await new Promise(r => setTimeout(r, 1200));
+      // Normal delay between turns
+      await new Promise(r => setTimeout(r, 1500));
 
     } catch (err) {
-      socket.emit('error', { message: err.message });
-      isRunning = false;
-      break;
+      // Even after all retries failed — wait longer and try the same turn again instead of crashing
+      debug(socket, `Turn ${turnCount} failed after retries: ${err.message}`);
+      socket.emit('error', { message: `Temporary error on turn ${turnCount}, retrying in 10s...` });
+
+      // Wait extra long then continue the loop (same turn will be retried next)
+      turnCount--; // so the same speaker tries again
+      await new Promise(r => setTimeout(r, 10000));
     }
   }
 
   isRunning = false;
+  debug(socket, 'Conversation ended');
   socket.emit('done', { message: 'Conversation ended' });
 }
 
@@ -127,6 +191,7 @@ app.get('/', (req, res) => {
 
 io.on('connection', (socket) => {
   console.log('Client connected');
+  debug(socket, 'Client connected');
 
   socket.on('start', () => {
     if (!KEY1 || !KEY2) {
@@ -138,14 +203,17 @@ io.on('connection', (socket) => {
 
   socket.on('stop', () => {
     isRunning = false;
+    debug(socket, 'Stop requested by user');
     socket.emit('done', { message: 'Stopped by user' });
   });
 
   socket.on('disconnect', () => {
     isRunning = false;
+    console.log('Client disconnected');
   });
 });
 
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Using models: ${MODEL1} / ${MODEL2}`);
 });
