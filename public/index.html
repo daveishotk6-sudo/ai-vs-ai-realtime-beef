@@ -79,6 +79,10 @@
     }
     .ai1 .speaker { color: #7eb8ff; }
     .ai2 .speaker { color: #ff9ece; }
+    .beef { 
+      background: linear-gradient(90deg, #5c1a1a, #3d0f0f) !important;
+      border: 1px solid #e94560;
+    }
     #status {
       padding: 10px 20px;
       background: #1a1a2e;
@@ -86,9 +90,22 @@
       color: #aaa;
       border-top: 1px solid #333;
     }
-    .beef { 
-      background: linear-gradient(90deg, #5c1a1a, #3d0f0f) !important;
-      border: 1px solid #e94560;
+    #debug-panel {
+      max-height: 140px;
+      overflow-y: auto;
+      background: #111;
+      border-top: 1px solid #333;
+      font-family: monospace;
+      font-size: 0.72rem;
+      color: #6f6;
+      padding: 8px 16px;
+      display: none;
+    }
+    #debug-panel.visible { display: block; }
+    .debug-toggle {
+      background: #333 !important;
+      font-size: 0.8rem;
+      padding: 8px 14px !important;
     }
   </style>
 </head>
@@ -96,23 +113,36 @@
   <header>
     <h1>🔥 AI vs AI Realtime Beef</h1>
     <div class="controls">
+      <button id="debugBtn" class="debug-toggle">Debug</button>
       <button id="startBtn">Start Conversation</button>
       <button id="stopBtn" disabled>Stop</button>
     </div>
   </header>
 
   <div id="chat"></div>
-  <div id="status">Ready. Set your two OpenRouter keys in Railway env vars and hit Start.</div>
+  <div id="debug-panel"></div>
+  <div id="status">Ready. Free models + auto-retry enabled. Hit Start.</div>
 
   <script>
     const socket = io();
     const chat = document.getElementById('chat');
     const status = document.getElementById('status');
+    const debugPanel = document.getElementById('debug-panel');
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
+    const debugBtn = document.getElementById('debugBtn');
+
+    let debugVisible = false;
+
+    debugBtn.onclick = () => {
+      debugVisible = !debugVisible;
+      debugPanel.classList.toggle('visible', debugVisible);
+      debugBtn.textContent = debugVisible ? 'Hide Debug' : 'Debug';
+    };
 
     startBtn.onclick = () => {
       chat.innerHTML = '';
+      debugPanel.innerHTML = '';
       startBtn.disabled = true;
       stopBtn.disabled = false;
       status.textContent = 'Conversation starting...';
@@ -135,10 +165,16 @@
       status.textContent = `Turn ${data.turn} — ${data.speaker} just spoke`;
     });
 
+    socket.on('debug', (data) => {
+      const line = document.createElement('div');
+      line.textContent = data.message;
+      debugPanel.appendChild(line);
+      debugPanel.scrollTop = debugPanel.scrollHeight;
+    });
+
     socket.on('error', (data) => {
-      status.textContent = 'Error: ' + data.message;
-      startBtn.disabled = false;
-      stopBtn.disabled = true;
+      status.textContent = data.message;
+      // Do NOT disable buttons — the server will keep retrying
     });
 
     socket.on('done', (data) => {
