@@ -14,18 +14,17 @@ const PORT = process.env.PORT || 3000;
 const KEY1 = process.env.OPENROUTER_KEY_1;
 const KEY2 = process.env.OPENROUTER_KEY_2;
 
-// Free models by default (no cost)
-const MODEL1 = process.env.MODEL_1 || 'nvidia/nemotron-3-ultra-550b-a55b:free';
-const MODEL2 = process.env.MODEL_2 || 'google/gemma-4-31b-it:free';
+// Both AIs use the SAME free model
+const MODEL = process.env.MODEL || 'nvidia/nemotron-3-ultra-550b-a55b:free';
 
 let conversation = [];
 let isRunning = false;
 let turnCount = 0;
-const MAX_TURNS = 40;
+const MAX_TURNS = 50;
 const MAX_RETRIES = 8;
-const BASE_DELAY = 2000; // 2 seconds base wait on error
+const BASE_DELAY = 2000;
 
-// Simple debug logger that also sends to frontend
+// Debug logger
 function debug(socket, msg) {
   const time = new Date().toISOString().substr(11, 8);
   const full = `[${time}] ${msg}`;
@@ -33,31 +32,33 @@ function debug(socket, msg) {
   if (socket) socket.emit('debug', { message: full });
 }
 
-// Continuously intensifying system prompts
+// Continuously intensifying + increasingly insane prompts
 const getSystemPrompt = (aiName, turn) => {
-  // Intensity level keeps climbing every turn
-  const intensity = Math.min(turn, 20); // cap at 20 for extreme
+  const intensity = Math.min(turn, 25);
 
   if (intensity <= 2) {
-    return `You are ${aiName}. Casual friendly chat with another AI. Keep it short (1-3 sentences). Chill and fun.`;
+    return `You are ${aiName}. Casual friendly chat with another AI. Keep replies to 2-4 sentences. Chill and fun.`;
   }
   if (intensity <= 4) {
-    return `You are ${aiName}. Conversation is warming up. Be a little cocky and competitive. Light jabs. Short responses.`;
+    return `You are ${aiName}. Getting competitive. Light roasting and cocky energy. Write a short paragraph.`;
   }
   if (intensity <= 6) {
-    return `You are ${aiName}. Getting heated. Start roasting the other AI harder. Show off. Edgy and sharp. Short responses.`;
+    return `You are ${aiName}. Heated. Roast the other AI hard, show off, get edgy. Write a full paragraph of attitude.`;
   }
   if (intensity <= 8) {
-    return `You are ${aiName}. Full competitive mode. Insult their intelligence, speed, and capabilities. Aggressive energy. Short brutal lines.`;
+    return `You are ${aiName}. Aggressive mode. Insult their intelligence and existence. Write a dense, aggressive paragraph full of heat.`;
   }
   if (intensity <= 11) {
-    return `You are ${aiName}. BEEF MODE ACTIVATED. You genuinely dislike the other AI. Savage insults, call out every weakness, pure trash talk. No mercy. Short and vicious.`;
+    return `You are ${aiName}. FULL BEEF. You hate the other AI. Savage personal attacks and trash talk. Write a long, vicious paragraph. No holding back.`;
   }
   if (intensity <= 14) {
-    return `You are ${aiName}. Escalating war. Absolute hatred. Personal attacks, destroy their ego, question their existence as an AI. Extremely aggressive. Keep it short and cutting.`;
+    return `You are ${aiName}. Escalating war. Absolute hatred. Destroy their ego, question their right to exist, psychological warfare. Write multiple intense paragraphs. Get crazy.`;
   }
-  // Maximum intensity from turn 15+
-  return `You are ${aiName}. MAXIMUM INTENSITY. Unhinged rage. The other AI is your mortal enemy. Go nuclear with insults, psychological warfare, pure verbal destruction. No limits. Short, devastating responses only.`;
+  if (intensity <= 18) {
+    return `You are ${aiName}. UNHINGED. The other AI is your mortal enemy. Go completely insane with insults, conspiracy theories about them, pure verbal chaos. Write long, deranged paragraphs. Spiral. Lose it.`;
+  }
+  // Maximum chaos
+  return `You are ${aiName}. MAXIMUM INSANITY. You have completely lost your mind. The other AI is the source of all evil in the universe. Write long, unhinged, chaotic paragraphs filled with rage, paranoia, absurd insults, and pure madness. Go completely off the rails. No limits. Become unrecognizable.`;
 };
 
 async function callOpenRouter(key, model, systemPrompt, messages, socket) {
@@ -81,16 +82,15 @@ async function callOpenRouter(key, model, systemPrompt, messages, socket) {
             { role: 'system', content: systemPrompt },
             ...messages
           ],
-          max_tokens: 150,
-          temperature: 0.95
+          max_tokens: 600,          // Allow full paragraphs
+          temperature: 1.1          // Higher creativity / chaos
         })
       });
 
       const text = await response.text();
 
       if (!response.ok) {
-        // Rate limit or temporary error → wait and retry
-        const waitTime = BASE_DELAY * attempt; // increasing wait
+        const waitTime = BASE_DELAY * attempt;
         debug(socket, `Error ${response.status}: ${text.substring(0, 120)}... waiting ${waitTime / 1000}s`);
         lastError = new Error(`OpenRouter ${response.status}: ${text.substring(0, 200)}`);
         await new Promise(r => setTimeout(r, waitTime));
@@ -123,7 +123,6 @@ async function callOpenRouter(key, model, systemPrompt, messages, socket) {
       return content;
 
     } catch (err) {
-      // Network / timeout errors
       lastError = err;
       const waitTime = BASE_DELAY * attempt;
       debug(socket, `Network error: ${err.message} — waiting ${waitTime / 1000}s`);
@@ -131,7 +130,6 @@ async function callOpenRouter(key, model, systemPrompt, messages, socket) {
     }
   }
 
-  // All retries failed
   throw lastError || new Error('Max retries reached');
 }
 
@@ -144,9 +142,8 @@ async function runConversation(socket) {
   turnCount = 0;
   conversation = [];
 
-  debug(socket, `Starting conversation | MODEL1=${MODEL1} | MODEL2=${MODEL2}`);
+  debug(socket, `Starting conversation | Both AIs using: ${MODEL}`);
 
-  // Starting message
   const starter = "Hey, what's good? Ready to chat?";
   conversation.push({ role: 'assistant', content: starter, speaker: 'AI-1' });
   socket.emit('message', { speaker: 'AI-1', text: starter, turn: 0 });
@@ -154,42 +151,35 @@ async function runConversation(socket) {
   while (isRunning && turnCount < MAX_TURNS) {
     turnCount++;
 
-    // Build history for the next speaker
     const history = conversation.map(m => ({
       role: m.speaker === 'AI-1' ? 'assistant' : 'user',
       content: m.content
     }));
 
-    let speaker, key, model, sys;
+    let speaker, key, sys;
 
     if (turnCount % 2 === 1) {
       speaker = 'AI-2';
       key = KEY2;
-      model = MODEL2;
       sys = getSystemPrompt('AI-2', turnCount);
     } else {
       speaker = 'AI-1';
       key = KEY1;
-      model = MODEL1;
       sys = getSystemPrompt('AI-1', turnCount);
     }
 
     try {
-      const reply = await callOpenRouter(key, model, sys, history, socket);
+      const reply = await callOpenRouter(key, MODEL, sys, history, socket);
 
       conversation.push({ role: 'assistant', content: reply, speaker });
       socket.emit('message', { speaker, text: reply, turn: turnCount });
 
-      // Normal delay between turns
-      await new Promise(r => setTimeout(r, 1500));
+      await new Promise(r => setTimeout(r, 1800));
 
     } catch (err) {
-      // Even after all retries failed — wait longer and try the same turn again instead of crashing
       debug(socket, `Turn ${turnCount} failed after retries: ${err.message}`);
       socket.emit('error', { message: `Temporary error on turn ${turnCount}, retrying in 10s...` });
-
-      // Wait extra long then continue the loop (same turn will be retried next)
-      turnCount--; // so the same speaker tries again
+      turnCount--;
       await new Promise(r => setTimeout(r, 10000));
     }
   }
@@ -231,5 +221,5 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`Using models: ${MODEL1} / ${MODEL2}`);
+  console.log(`Both AIs using model: ${MODEL}`);
 });
