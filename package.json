@@ -1,0 +1,19 @@
+{
+  "name": "ai-vs-ai-realtime-beef",
+  "version": "1.0.0",
+  "description": "Realtime AI vs AI conversation that turns into a beef using OpenRouter",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "socket.io": "^4.7.5",
+    "dotenv": "^16.4.5",
+    "node-fetch": "^2.7.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
