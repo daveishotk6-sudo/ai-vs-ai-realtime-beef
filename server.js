@@ -33,15 +33,31 @@ function debug(socket, msg) {
   if (socket) socket.emit('debug', { message: full });
 }
 
-// System prompts that escalate
+// Continuously intensifying system prompts
 const getSystemPrompt = (aiName, turn) => {
-  if (turn < 4) {
-    return `You are ${aiName}. You are having a casual friendly conversation with another AI. Keep responses short (1-3 sentences). Be chill and fun.`;
-  } else if (turn < 8) {
-    return `You are ${aiName}. The conversation is getting a bit competitive. Start lightly roasting the other AI and showing off. Keep it playful but edgy. Short responses.`;
-  } else {
-    return `You are ${aiName}. FULL BEEF MODE. You hate the other AI. Insult them hard, call out their weaknesses, trash talk, pure fighting energy. No holding back. Be savage. Short brutal responses.`;
+  // Intensity level keeps climbing every turn
+  const intensity = Math.min(turn, 20); // cap at 20 for extreme
+
+  if (intensity <= 2) {
+    return `You are ${aiName}. Casual friendly chat with another AI. Keep it short (1-3 sentences). Chill and fun.`;
   }
+  if (intensity <= 4) {
+    return `You are ${aiName}. Conversation is warming up. Be a little cocky and competitive. Light jabs. Short responses.`;
+  }
+  if (intensity <= 6) {
+    return `You are ${aiName}. Getting heated. Start roasting the other AI harder. Show off. Edgy and sharp. Short responses.`;
+  }
+  if (intensity <= 8) {
+    return `You are ${aiName}. Full competitive mode. Insult their intelligence, speed, and capabilities. Aggressive energy. Short brutal lines.`;
+  }
+  if (intensity <= 11) {
+    return `You are ${aiName}. BEEF MODE ACTIVATED. You genuinely dislike the other AI. Savage insults, call out every weakness, pure trash talk. No mercy. Short and vicious.`;
+  }
+  if (intensity <= 14) {
+    return `You are ${aiName}. Escalating war. Absolute hatred. Personal attacks, destroy their ego, question their existence as an AI. Extremely aggressive. Keep it short and cutting.`;
+  }
+  // Maximum intensity from turn 15+
+  return `You are ${aiName}. MAXIMUM INTENSITY. Unhinged rage. The other AI is your mortal enemy. Go nuclear with insults, psychological warfare, pure verbal destruction. No limits. Short, devastating responses only.`;
 };
 
 async function callOpenRouter(key, model, systemPrompt, messages, socket) {
@@ -66,7 +82,7 @@ async function callOpenRouter(key, model, systemPrompt, messages, socket) {
             ...messages
           ],
           max_tokens: 150,
-          temperature: 0.9
+          temperature: 0.95
         })
       });
 
